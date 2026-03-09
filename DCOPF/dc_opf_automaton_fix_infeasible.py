@@ -56,3 +56,16 @@ if __name__ == "__main__":
     results4 = solve_automaton_milp(params4, True, True)
     print_results(params4, results4)
     validate_with_dc_lf(pn.load("two_buses.xiidm"), results4)
+
+    # ── Case 5: Line over limit — automaton trips it ──────────────────────────
+    print("\n" + "═" * 58)
+    print(
+        "  CASE 5 — Pmax = 60 MW  (natural flow ≈ 100 MW → TRIP) - Fix with load shedding and remove Pmin G1 = 0 with curtailment variable")
+    print("═" * 58)
+    params5 = extract_parameters(network)
+    params5["ptdf"] = ptdf
+    params5["P12_max"] = 60
+    params5["M"] = sum(params5["Pg_max"].values())  # 200 + 150 = 350 M
+    results5 = solve_automaton_milp(params5, True, True)
+    print_results(params5, results5)
+    validate_with_dc_lf(pn.load("two_buses.xiidm"), results5)

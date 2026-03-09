@@ -36,9 +36,6 @@ class SIP_Framework:
 
         return None
 
-
-# --- Implémentation spécifique pour ton problème ---
-
 class LBP:
     def __init__(self):
         self.model = xpress.Model()
