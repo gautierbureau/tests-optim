@@ -27,6 +27,8 @@ import pypowsybl.sensitivity as psa
 import pypowsybl as ppw
 import pyoptinterface as poi
 from pyoptinterface import xpress
+from dc_opf_pst_focus import build_network
+from common_pst import build_pst_dataframes
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -62,147 +64,6 @@ BRANCHES    = ["L12a", "L1_2a", "PST_T", "L2b_3"]
 # ─────────────────────────────────────────────────────────────────────────────
 # 1.  Build pypowsybl network with DataFrame PST API
 # ─────────────────────────────────────────────────────────────────────────────
-
-def build_pst_dataframes() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Construct the two DataFrames required by create_phase_tap_changers.
-
-    ptc_df — one row per PST transformer
-    ──────────────────────────────────────
-      id                : matches the transformer id
-      target_deadband   : regulation deadband (MW) — unused in OPF (manual mode)
-      regulation_mode   : 'FIXED_TAP' for OPF-controlled PST
-                          'ACTIVE_POWER_CONTROL' for closed-loop regulation
-      low_tap           : index of the first step (0-based)
-      tap               : current active tap (we start at neutral = 10)
-
-    steps_df — one row per tap step, repeated id for each step of same PST
-    ────────────────────────────────────────────────────────────────────────
-      id    : transformer id (repeated for each step)
-      alpha : phase shift angle in degrees for this step
-      rho   : turns ratio (1.0 = ideal, no voltage magnitude change)
-      r, x  : additional series impedance per step (pu, on transformer base)
-               set to 0 for an ideal PST
-      g, b  : additional shunt admittance per step (pu)
-               set to 0 for an ideal PST
-
-    Note on alpha sign convention in pypowsybl
-    -------------------------------------------
-      alpha > 0 : phase of winding-2 leads winding-1  → P flows from 1 to 2
-      alpha < 0 : phase of winding-2 lags  winding-1  → P flows from 2 to 1
-      Consistent with IEC 60076-3.
-    """
-    # ── ptc_df: one row for PST_T ─────────────────────────────────────────────
-    ptc_df = pd.DataFrame.from_records(
-        index="id",
-        columns=["id", "target_deadband", "regulation_mode", "low_tap", "tap", "regulating"],
-        data=[
-            ("PST_T",
-             0.0,              # no deadband — OPF sets tap explicitly
-             "ACTIVE_POWER_CONTROL",      # manual mode; OPF writes the tap via update_phase_tap_changers
-             0,                # low_tap: first step index
-             NEUTRAL_TAP,
-             False)      # initial active tap (0° shift)
-        ]
-    )
-
-    # ── steps_df: one row per tap step ────────────────────────────────────────
-    # alpha goes from −30° (tap 0) to +30° (tap 20) in 3° increments
-    steps_records = []
-    for tap_idx in range(N_STEPS):
-        alpha_deg = (tap_idx - NEUTRAL_TAP) * ALPHA_STEP   # −30, −27, ..., 0, ..., +30
-        steps_records.append((
-            "PST_T",    # id
-            0.0,        # b  (no additional shunt susceptance)
-            0.0,        # g  (no additional shunt conductance)
-            0.0,        # r  (no additional series resistance)
-            0.0,        # x  (no additional series reactance — base x set on transformer)
-            1.0,        # rho (ideal turns ratio)
-            alpha_deg,  # alpha: phase shift in degrees
-        ))
-
-    steps_df = pd.DataFrame.from_records(
-        index="id",
-        columns=["id", "b", "g", "r", "x", "rho", "alpha"],
-        data=steps_records,
-    )
-
-    return ptc_df, steps_df
-
-
-def build_network() -> pn.Network:
-    """
-    Bypass PST topology.
-    PST_T created with DataFrame API.
-    """
-    net = pn.create_empty("pst_dataframe_api")
-
-    net.create_substations(id=["S1","S2","S3"], country=["FR","FR","FR"])
-    net.create_voltage_levels(
-        id            = ["VL1",        "VL2a",       "VL2b",       "VL3"],
-        substation_id = ["S1",         "S2",         "S2",         "S3"],
-        topology_kind = ["BUS_BREAKER","BUS_BREAKER","BUS_BREAKER","BUS_BREAKER"],
-        nominal_v     = [KV, KV, KV, KV],
-    )
-    net.create_buses(
-        id               = ["B1",  "B2a", "B2b", "B3"],
-        voltage_level_id = ["VL1", "VL2a","VL2b","VL3"],
-    )
-
-    # Lines (different substations)
-    net.create_lines(
-        id=["L12a"],
-        voltage_level1_id=["VL1"],  bus1_id=["B1"],
-        voltage_level2_id=["VL2b"], bus2_id=["B2b"],
-        r=[0.0], x=[BASE_MVA/B_L12A],
-        g1=[0.0], b1=[0.0], g2=[0.0], b2=[0.0],
-    )
-    net.create_lines(
-        id=["L1_2a"],
-        voltage_level1_id=["VL1"],  bus1_id=["B1"],
-        voltage_level2_id=["VL2a"], bus2_id=["B2a"],
-        r=[0.0], x=[BASE_MVA/B_L1_2A],
-        g1=[0.0], b1=[0.0], g2=[0.0], b2=[0.0],
-    )
-    net.create_lines(
-        id=["L2b_3"],
-        voltage_level1_id=["VL2b"], bus1_id=["B2b"],
-        voltage_level2_id=["VL3"],  bus2_id=["B3"],
-        r=[0.0], x=[BASE_MVA/B_L2B_3],
-        g1=[0.0], b1=[0.0], g2=[0.0], b2=[0.0],
-    )
-
-    # PST transformer (same substation S2 — valid)
-    net.create_2_windings_transformers(
-        id=["PST_T"],
-        voltage_level1_id=["VL2a"], bus1_id=["B2a"],
-        voltage_level2_id=["VL2b"], bus2_id=["B2b"],
-        rated_u1=[KV], rated_u2=[KV],
-        r=[0.0], x=[BASE_MVA/B_PST * Z_BASE], g=[0.0], b=[0.0],
-    )
-
-    # ── Phase tap changer via DataFrame API ───────────────────────────────────
-    ptc_df, steps_df = build_pst_dataframes()
-    net.create_phase_tap_changers(ptc_df, steps_df)
-
-    net.create_generators(
-        id=["G1","G2"],
-        voltage_level_id=["VL1","VL3"],
-        bus_id=["B1","B3"],
-        energy_source=["OTHER","OTHER"],
-        min_p=[0.0,0.0], max_p=[300.0,150.0],
-        target_p=[200.0,50.0],
-        target_v=[KV,KV],
-        target_q=[0, 1],
-        voltage_regulator_on=[True,False],
-    )
-    net.create_loads(
-        id=["D3"], voltage_level_id=["VL3"], bus_id=["B3"],
-        p0=[250.0], q0=[0.0],
-    )
-
-    return net
-
 
 def inspect_pst(network: pn.Network) -> None:
     """Print the phase tap changer and its steps to verify the DataFrame API."""
@@ -469,7 +330,6 @@ def print_results(r: dict, title: str = "") -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-
     # ── Print PST DataFrame structure ─────────────────────────────────────────
     ptc_df, steps_df = build_pst_dataframes()
 

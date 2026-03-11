@@ -486,6 +486,7 @@ def solve_milp(params: dict,
 
 def validate(results: dict) -> None:
     net = build_network()
+    net.save("pst2.xiidm")
 
     for g, pval in results["Pg"].items():
         net.update_generators(id=g, target_p=pval)
