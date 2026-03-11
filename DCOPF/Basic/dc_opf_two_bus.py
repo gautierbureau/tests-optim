@@ -235,7 +235,7 @@ def sensitivity_analysis(params: dict) -> None:
     Shows how tightening P12_max forces a more expensive dispatch.
     """
     print("── Constraint sensitivity: P12_max sweep ──────────────────────")
-    print(f"  {'P12_max (MW)':>14}  {'Pg1 (MW)':>10}  {'Pg2 (MW)':>10}  {'Cost ($/h)':>12}  {'LMP_B1':>8}  {'LMP_B2':>8}")
+    print(f"  {'P12_max (MW)':>14}  {'Pg1 (MW)':>10}  {'Pg2 (MW)':>10}  {'Cost ($/h)':>12}  {'LMP_B1':>8}  {'LMP_B2':>8} {'PTDF shadow'}")
     print("  " + "─" * 70)
 
     for limit in [200, 150, 120, 100, 80, 60]:
@@ -245,6 +245,7 @@ def sensitivity_analysis(params: dict) -> None:
             print(f"  {limit:>14}  {r['Pg']['G1']:>10.2f}  {r['Pg']['G2']:>10.2f}"
                   f"  {r['total_cost']:>12.2f}"
                   f"  {r['LMP']['B1']:>8.4f}  {r['LMP']['B2']:>8.4f}"
+                  f"  {r['shadow_line']:>8.4f}"
                   )
         except RuntimeError as e:
             print(f"  {limit:>14}  INFEASIBLE ({e})")

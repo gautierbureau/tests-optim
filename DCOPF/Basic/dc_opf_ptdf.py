@@ -115,28 +115,6 @@ def compute_ptdf_analytical(x_pu: float = 0.1, base_mva: float = 100.0) -> dict[
     ptdf_B2 = (-1.0) * (1.0 / b) * b    # A_red · B_red⁻¹  = -1
     return {"G1": 0.0, "G2": ptdf_B2}
 
-
-# def extract_parameters(network: pn.Network, ptdf: dict[str, float]) -> dict:
-#     base_mva = 100.0
-#
-#     gens  = network.get_generators()
-#     loads = network.get_loads()
-#
-#     Pg_min = {g: gens.loc[g, "min_p"]  for g in gens.index}
-#     Pg_max = {g: gens.loc[g, "max_p"]  for g in gens.index}
-#     Pd     = {"D2": loads.loc["D2", "p0"]}
-#     Pd_bus = {"B1": 0.0, "B2": Pd["D2"]}
-#
-#     cost      = {"G1": 30.0, "G2": 45.0}
-#     P12_max   = 120.0   # MW
-#
-#     return dict(
-#         Pg_min=Pg_min, Pg_max=Pg_max, Pd_bus=Pd_bus,
-#         cost=cost,     P12_max=P12_max, ptdf=ptdf,
-#         base_mva=base_mva,
-#     )
-
-
 # ── 4. DC-OPF with PTDF Flow Constraints ─────────────────────────────────────
 
 def solve_dc_opf_ptdf(params: dict) -> dict:
@@ -315,7 +293,7 @@ def sensitivity_analysis(params: dict) -> None:
     Shows how tightening P12_max forces a more expensive dispatch.
     """
     print("── Constraint sensitivity: P12_max sweep ──────────────────────")
-    print(f"  {'P12_max (MW)':>14}  {'Pg1 (MW)':>10}  {'Pg2 (MW)':>10}  {'Cost ($/h)':>12}  {'LMP_B1':>8}  {'LMP_B2':>8}")
+    print(f"  {'P12_max (MW)':>14}  {'Pg1 (MW)':>10}  {'Pg2 (MW)':>10}  {'Cost ($/h)':>12}  {'LMP_B1':>8}  {'LMP_B2':>8}  {'PTDF shadow':>8}")
     print("  " + "─" * 70)
 
     for limit in [200, 150, 120, 100, 80, 60]:
@@ -325,6 +303,7 @@ def sensitivity_analysis(params: dict) -> None:
             print(f"  {limit:>14}  {r['Pg']['G1']:>10.2f}  {r['Pg']['G2']:>10.2f}"
                   f"  {r['total_cost']:>12.2f}"
                   f"  {r['LMP']['B1']:>8.4f}  {r['LMP']['B2']:>8.4f}"
+                  f"  {r['shadow_ptdf']:>8.4f}"
                   )
         except RuntimeError as e:
             print(f"  {limit:>14}  INFEASIBLE ({e})")
