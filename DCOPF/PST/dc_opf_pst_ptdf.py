@@ -81,6 +81,8 @@ With Pd_B3 = 250 MW and PTDF/PSDF as derived:
 """
 
 import math
+from typing import Any
+
 import numpy as np
 import pypowsybl.network as pn
 import pypowsybl.loadflow as plf
@@ -88,6 +90,7 @@ import pypowsybl.sensitivity as psa
 import pypowsybl as ppw
 import pandas as pd
 import pyoptinterface as poi
+from pandas import DataFrame
 from pyoptinterface import xpress
 from dc_opf_pst_focus import build_network
 
@@ -159,7 +162,7 @@ def compute_sensitivities_analytical() -> dict:
     return {"ptdf": ptdf, "psdf": psdf}
 
 
-def verify_sensitivities_pypowsybl(network: pn.Network, sens: dict) -> None:
+def verify_sensitivities_pypowsybl(network: pn.Network, sens: dict) -> tuple[dict[str, Any], dict[str, Any]]:
     """
     Cross-check analytical PTDF/PSDF against pypowsybl sensitivity analysis.
     Uses distributed_slack=False so G1 absorbs all imbalance (pure slack).
@@ -171,7 +174,7 @@ def verify_sensitivities_pypowsybl(network: pn.Network, sens: dict) -> None:
     # PTDF: sensitivity of branch flows to generator injections
     sa.add_branch_flow_factor_matrix(
         branches_ids  = BRANCHES,
-        variables_ids = GENS,
+        variables_ids = ["G1", "G2", "D3"],
         matrix_id     = "PTDF",
     )
 
@@ -183,7 +186,7 @@ def verify_sensitivities_pypowsybl(network: pn.Network, sens: dict) -> None:
         matrix_id     = "PSDF",
     )
 
-    lf_params = plf.Parameters(distributed_slack=False)
+    lf_params = plf.Parameters(distributed_slack=True)
     result    = sa.run(network, parameters=lf_params)
 
     df_ptdf = result.get_sensitivity_matrix("PTDF")
@@ -199,7 +202,7 @@ def verify_sensitivities_pypowsybl(network: pn.Network, sens: dict) -> None:
         ptdf_ana  = sens["ptdf"][br]
         psdf_ana  = sens["psdf"][br]
         ptdf_ppw  = float(df_ptdf.loc["G2", br])
-        psdf_ppw  = float(df_psdf.loc["PST_T", br])
+        psdf_ppw  = -float(df_psdf.loc["PST_T", br]) * (180 / math.pi)
 
         match_ptdf = "✓" if abs(ptdf_ana - ptdf_ppw) < 0.01 else "✗"
         match_psdf = "✓" if abs(psdf_ana - psdf_ppw) < 1.0   else "~"
@@ -207,6 +210,27 @@ def verify_sensitivities_pypowsybl(network: pn.Network, sens: dict) -> None:
               f"  {psdf_ana:>12.4f}  {psdf_ppw:>12.4f} {match_psdf}")
     print()
 
+    # ptdf = {
+    #     "L12a": df_ptdf.loc["G2", "L12a"],
+    #     "L1_2a": df_ptdf.loc["G2", "L1_2a"],
+    #     "PST_T": df_ptdf.loc["G2", "PST_T"],
+    #     "L2b_3": df_ptdf.loc["G2", "L2b_3"],  # -b_out*(θ_B2b-θ_B3)
+    # }
+
+    ptdf = {gen: {br: float(result.get_sensitivity_matrix("PTDF").loc[gen, br]) for br in BRANCHES} for gen in ["G1", "G2", "D3"]}
+
+    # psdf = {
+    #     "L12a": df_psdf.loc["PST_T", "L12a"] * (180 / math.pi),
+    #     "L1_2a": df_psdf.loc["PST_T", "L1_2a"] * (180 / math.pi),
+    #     "PST_T": df_psdf.loc["PST_T", "PST_T"] * (180 / math.pi),
+    #     "L2b_3": df_psdf.loc["PST_T", "L2b_3"] * (180 / math.pi),
+    # }
+
+    psdf = {br: float(df_psdf.loc["PST_T", br])
+                * (180 / math.pi)  # convert MW/deg → MW/rad
+            for br in BRANCHES}
+
+    return ptdf, psdf
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3.  Parameters
@@ -302,11 +326,16 @@ def solve_lp_ptdf(params: dict,
     #
     cons_ptdf = {}
     for br in BRANCHES:
-        rhs = ptdf[br] * (-Pd_B3)
+        # rhs = ptdf[br] * (-Pd_B3)
+        # cons_ptdf[br] = model.add_linear_constraint(
+        #     P[br] - ptdf[br] * Pg["G2"] - psdf[br] * phi,
+        #     poi.Eq, rhs,
+        #     name=f"ptdf_{br}",
+        # )
+        rhs = ptdf["D3"][br] * (-Pd_B3)
         cons_ptdf[br] = model.add_linear_constraint(
-            P[br] - ptdf[br] * Pg["G2"] - psdf[br] * phi,
-            poi.Eq, rhs,
-            name=f"ptdf_{br}",
+            P[br] - ptdf["G1"][br]*Pg["G1"] - ptdf["G2"][br]*Pg["G2"] - psdf[br]*phi,
+            poi.Eq, rhs, name=f"ptdf_{br}",
         )
 
     # ── Nodal balance ─────────────────────────────────────────────────────────
@@ -324,7 +353,7 @@ def solve_lp_ptdf(params: dict,
     # B3 (load bus):  Pg_G2 + P_L2b_3 = Pd_B3
     #   This fixes the total system balance (Pg_G1+Pg_G2 = Pd_B3)
     con_B3 = model.add_linear_constraint(
-        Pg["G2"] - P["L2b_3"],
+        Pg["G2"] + P["L2b_3"],
         poi.Eq, Pd_B3, name="bal_B3",
     )
 
@@ -444,7 +473,7 @@ def print_results(r: dict, sens: dict, title: str = "") -> None:
     for br in BRANCHES:
         flow     = r["P"][br]
         pm       = r["pmax"][br]
-        ptdf_term = ptdf[br] * (Pg_G2 - Pd)
+        ptdf_term = ptdf["G2"][br] * (Pg_G2 - Pd)
         psdf_term = psdf[br] * phi_rad
         load_pct  = 100 * abs(flow) / pm
         flag      = " ◄ BINDING" if load_pct > 99.0 else ""
@@ -452,7 +481,7 @@ def print_results(r: dict, sens: dict, title: str = "") -> None:
               f"{load_pct:>5.1f}%  {ptdf_term:>+10.3f}  "
               f"{psdf_term:>+8.3f}{flag}")
     print(sep)
-    print(f"  Note: PSDF(L2b_3)=0 → L2b_3 flow = {ptdf['L2b_3']*(Pg_G2-Pd):+.2f} MW"
+    print(f"  Note: PSDF(L2b_3)=0 → L2b_3 flow = {ptdf['G2']['L2b_3']*(Pg_G2-Pd):+.2f} MW"
           f"  (φ-independent, = 250 − Pg_G2 = {250-Pg_G2:.2f})")
     print(sep)
     print(f"  LMPs:  B1=${r['LMP']['B1']:>8.4f}/MWh   B3=${r['LMP']['B3']:>8.4f}/MWh")
@@ -518,11 +547,13 @@ if __name__ == "__main__":
     print()
 
     net    = build_network()
-    verify_sensitivities_pypowsybl(net, sens)
+    pypow_df_ptdf, pypow_df_psdf = verify_sensitivities_pypowsybl(net, sens)
+    pypow_sens = {"ptdf": pypow_df_ptdf, "psdf": pypow_df_psdf}
+    sens = pypow_sens
     params = extract_parameters(net)
 
     # ── Case 1: no congestion ─────────────────────────────────────────────────
-    r1 = solve_lp_ptdf(params, sens, pmax_l12a=250.0)
+    r1 = solve_lp_ptdf(params, sens, pmax_l12a=110.0)
     print_results(r1, sens, "Case 1 — No congestion (Pmax_a=250 MW)")
     validate(r1)
 

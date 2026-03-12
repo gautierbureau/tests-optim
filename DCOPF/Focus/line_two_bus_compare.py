@@ -21,6 +21,7 @@ from pyoptinterface import xpress
 
 BASE_MVA = 100.0
 KV       = 400.0
+Z_BASE      = KV**2 / BASE_MVA
 B_L12    = 250.0        # MW/rad  (x = 0.4 pu)
 PMAX_L12 = 120.0        # MW
 PD_B2    = 250.0        # MW
@@ -38,7 +39,7 @@ def build_network() -> pn.Network:
         id=["L12"],
         voltage_level1_id=["VL1"], bus1_id=["B1"],
         voltage_level2_id=["VL2"], bus2_id=["B2"],
-        r=[0.0], x=[BASE_MVA/B_L12],
+        r=[0.0], x=[BASE_MVA/B_L12 * Z_BASE],
         g1=[0.0], b1=[0.0], g2=[0.0], b2=[0.0],
     )
     net.create_generators(

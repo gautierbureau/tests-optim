@@ -116,7 +116,7 @@ def build_network() -> pn.Network:
         id=["L12a"],
         voltage_level1_id=["VL1"],  bus1_id=["B1"],
         voltage_level2_id=["VL2b"], bus2_id=["B2b"],   # ← arrives at B2b
-        r=[0.0], x=[BASE_MVA / B_L12A],
+        r=[0.0], x=[BASE_MVA / B_L12A * Z_BASE],
         g1=[0.0], b1=[0.0], g2=[0.0], b2=[0.0],
     )
 
@@ -125,7 +125,7 @@ def build_network() -> pn.Network:
         id=["L1_2a"],
         voltage_level1_id=["VL1"],  bus1_id=["B1"],
         voltage_level2_id=["VL2a"], bus2_id=["B2a"],   # ← arrives at B2a
-        r=[0.0], x=[BASE_MVA / B_L1_2A],
+        r=[0.0], x=[BASE_MVA / B_L1_2A * Z_BASE],
         g1=[0.0], b1=[0.0], g2=[0.0], b2=[0.0],
     )
 
@@ -134,7 +134,7 @@ def build_network() -> pn.Network:
         id=["L2b_3"],
         voltage_level1_id=["VL2b"], bus1_id=["B2b"],
         voltage_level2_id=["VL3"],  bus2_id=["B3"],
-        r=[0.0], x=[BASE_MVA / B_L2B_3],
+        r=[0.0], x=[BASE_MVA / B_L2B_3 * Z_BASE],
         g1=[0.0], b1=[0.0], g2=[0.0], b2=[0.0],
     )
 
