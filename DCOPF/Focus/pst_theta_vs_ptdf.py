@@ -193,19 +193,13 @@ def solve_ptdf(sens: dict) -> dict:
     # PTDF constraints: P_l - PTDF·Pg2 - PSDF·φ = PTDF·(-Pd_B3)
     for br in BRANCHES:
         rhs = ptdf["D3"][br] * (-PD_B3)
-        # m.add_linear_constraint(
-        #     P[br] - ptdf["G1"][br]*Pg1 - ptdf["G2"][br]*Pg2 - psdf[br]*phi,
-        #     poi.Eq, ptdf["G2"][br]*(-PD_B3), name=f"ptdf_{br}",
-        # )
         m.add_linear_constraint(
             P[br] - ptdf["G1"][br]*Pg1 - ptdf["G2"][br]*Pg2 - psdf[br]*phi,
             poi.Eq, rhs, name=f"ptdf_{br}",
         )
 
     # Balances (only B1 and B3 needed — transit buses implicit in PTDF)
-    m.add_linear_constraint(Pg1 - P["L12a"] - P["L1_2a"], poi.Eq, 0,     name="bal_B1")
-    m.add_linear_constraint(Pg2 + P["L2b_3"],              poi.Eq, PD_B3, name="bal_B3")
-    #m.add_linear_constraint(Pg1 + Pg2, poi.Eq, PD_B3, name="global_balance")
+    m.add_linear_constraint(Pg1 + Pg2, poi.Eq, PD_B3, name="global_balance")
 
     m.add_linear_constraint(psi - phi, poi.Geq, 0)
     m.add_linear_constraint(psi + phi, poi.Geq, 0)

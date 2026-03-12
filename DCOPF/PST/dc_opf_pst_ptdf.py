@@ -345,17 +345,19 @@ def solve_lp_ptdf(params: dict,
     # B1 (slack source):  Pg_G1 − P_L12a − P_L1_2a = 0
     #   Note: B2a, B2b are transit (no gen/load) — their balances are
     #   implicitly enforced by the PTDF construction
-    con_B1 = model.add_linear_constraint(
-        Pg["G1"] - P["L12a"] - P["L1_2a"],
-        poi.Eq, 0.0, name="bal_B1",
-    )
+    # con_B1 = model.add_linear_constraint(
+    #     Pg["G1"] - P["L12a"] - P["L1_2a"],
+    #     poi.Eq, 0.0, name="bal_B1",
+    # )
+    #
+    # # B3 (load bus):  Pg_G2 + P_L2b_3 = Pd_B3
+    # #   This fixes the total system balance (Pg_G1+Pg_G2 = Pd_B3)
+    # con_B3 = model.add_linear_constraint(
+    #     Pg["G2"] + P["L2b_3"],
+    #     poi.Eq, Pd_B3, name="bal_B3",
+    # )
 
-    # B3 (load bus):  Pg_G2 + P_L2b_3 = Pd_B3
-    #   This fixes the total system balance (Pg_G1+Pg_G2 = Pd_B3)
-    con_B3 = model.add_linear_constraint(
-        Pg["G2"] + P["L2b_3"],
-        poi.Eq, Pd_B3, name="bal_B3",
-    )
+    model.add_linear_constraint(Pg["G1"] + Pg["G2"], poi.Eq, Pd_B3, name="global_balance")
 
     # ── |φ| linearisation ────────────────────────────────────────────────────
     model.add_linear_constraint(psi - phi, poi.Geq, 0.0, name="psi_pos")
@@ -386,10 +388,10 @@ def solve_lp_ptdf(params: dict,
         "phi_deg"     : math.degrees(phi_val),
         "phi_rad"     : phi_val,
         "psi_rad"     : val(psi),
-        "LMP"         : {
-            "B1": dual(con_B1),
-            "B3": dual(con_B3),
-        },
+        # "LMP"         : {
+        #     "B1": dual(con_B1),
+        #     "B3": dual(con_B3),
+        # },
         "ptdf_duals"  : {br: dual(cons_ptdf[br]) for br in BRANCHES},
         "pmax"        : pmax,
     }
@@ -484,8 +486,8 @@ def print_results(r: dict, sens: dict, title: str = "") -> None:
     print(f"  Note: PSDF(L2b_3)=0 → L2b_3 flow = {ptdf['G2']['L2b_3']*(Pg_G2-Pd):+.2f} MW"
           f"  (φ-independent, = 250 − Pg_G2 = {250-Pg_G2:.2f})")
     print(sep)
-    print(f"  LMPs:  B1=${r['LMP']['B1']:>8.4f}/MWh   B3=${r['LMP']['B3']:>8.4f}/MWh")
-    print(f"  Congestion rent B1→B3 = ${r['LMP']['B3']-r['LMP']['B1']:>+.4f}/MWh")
+    # print(f"  LMPs:  B1=${r['LMP']['B1']:>8.4f}/MWh   B3=${r['LMP']['B3']:>8.4f}/MWh")
+    # print(f"  Congestion rent B1→B3 = ${r['LMP']['B3']-r['LMP']['B1']:>+.4f}/MWh")
     print(f"{'═'*70}")
 
 
@@ -500,7 +502,8 @@ def sweep_pmax(params: dict, sens: dict) -> None:
     hdr = (f"  {'Pmax_a':>7}  {'φ°':>7}  "
            f"{'P_L12a':>8}  {'P_L1_2a':>8}  {'P_PST':>8}  {'P_L2b3':>8}  "
            f"{'Pg1':>7}  {'Pg2':>7}  "
-           f"{'LMP_B1':>8}  {'LMP_B3':>8}  {'Cost':>10}")
+           # f"{'LMP_B1':>8}  {'LMP_B3':>8}  "
+           f"{'Cost':>10}")
     print(hdr)
     print("  " + "─" * 92)
 
@@ -512,7 +515,7 @@ def sweep_pmax(params: dict, sens: dict) -> None:
                 f"{r['P']['L12a']:>+8.2f}  {r['P']['L1_2a']:>+8.2f}  "
                 f"{r['P']['PST_T']:>+8.2f}  {r['P']['L2b_3']:>+8.2f}  "
                 f"{r['Pg']['G1']:>7.2f}  {r['Pg']['G2']:>7.2f}  "
-                f"{r['LMP']['B1']:>8.4f}  {r['LMP']['B3']:>8.4f}  "
+                # f"{r['LMP']['B1']:>8.4f}  {r['LMP']['B3']:>8.4f}  "
                 f"{r['total_cost']:>10.2f}"
             )
         except RuntimeError as e:
@@ -553,7 +556,7 @@ if __name__ == "__main__":
     params = extract_parameters(net)
 
     # ── Case 1: no congestion ─────────────────────────────────────────────────
-    r1 = solve_lp_ptdf(params, sens, pmax_l12a=110.0)
+    r1 = solve_lp_ptdf(params, sens, pmax_l12a=250.0)
     print_results(r1, sens, "Case 1 — No congestion (Pmax_a=250 MW)")
     validate(r1)
 
