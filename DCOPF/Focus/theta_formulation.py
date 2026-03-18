@@ -2,12 +2,15 @@ import pypowsybl as pp
 import math
 import pyoptinterface as poi
 from pyoptinterface import xpress
+import pandas as pd
 
 THETA_MAX   = math.pi / 3
 PHI_MAX   = math.radians(30.0)
 BASE_MVA = 100
 
 def theta_formulation(network):
+    variables_bounds = False # To switch between Variable Bounds vs Explicit Constraints for lines to get dual
+
     generators = network.get_generators(all_attributes=True)
     loads = network.get_loads(all_attributes=True)
     buses = network.get_buses(all_attributes=True)
@@ -76,6 +79,9 @@ def theta_formulation(network):
     lines['max_p'] = lines.index.map(line_max_p)
     tfos['max_p'] = tfos.index.map(tfos_max_p)
 
+    df_branches = pd.concat([lines, tfos], sort=False)
+    branches = df_branches.index.to_list()
+
     generators_cost = {
         'G1': 30,
         'G2': 45
@@ -83,23 +89,22 @@ def theta_formulation(network):
 
     generators['cost'] = generators.index.map(generators_cost)
 
-    PLine = {
-        l: model.add_variable(
-            lb=-lines.at[l, 'max_p'],
-            ub=lines.at[l, 'max_p'],
-            name=f"P_{l}"
-        )
-        for l in lines.index
-    }
-
-    PLine.update({
-        t: model.add_variable(
-            lb=-tfos.at[t, 'max_p'],
-            ub=tfos.at[t, 'max_p'],
-            name=f"P_{t}"
-        )
-        for t in tfos.index
-    })
+    if variables_bounds:
+        PLine = {
+            branch: model.add_variable(
+                lb=-df_branches.at[branch, 'max_p'],
+                ub=df_branches.at[branch, 'max_p'],
+                name=f"P_{branch}"
+            )
+            for branch in branches
+        }
+    else:
+        PLine = {
+            branch: model.add_variable(
+                name=f"P_{branch}"
+            )
+            for branch in branches
+        }
 
     print(PLine)
 
@@ -116,27 +121,39 @@ def theta_formulation(network):
     print(phi)
     print(psi)
 
-    for phiVar, psiVar in zip(phi.values(), psi.values()):
-        model.add_linear_constraint(psiVar - phiVar, poi.Geq, 0)
-        model.add_linear_constraint(psiVar + phiVar, poi.Geq, 0)
+    con_psi_lb, con_psi_ub = {}, {}
+    for pstId, (phiVar, psiVar) in zip(phi.keys(), zip(phi.values(), psi.values())):
+        con_psi_lb[pstId] = model.add_linear_constraint(psiVar - phiVar, poi.Geq, 0)
+        con_psi_ub[pstId] = model.add_linear_constraint(psiVar + phiVar, poi.Geq, 0)
 
-    for lidx, l in lines.iterrows():
-        x = l['x']
-        Z_BASE = l['nominal_v_2']**2 / BASE_MVA
+    branch_constraints = {}
+    con_lb, con_ub = {}, {}
+    for bridx, br in df_branches.iterrows():
+        x = br['x']
+        if bridx in psts.index:
+            x = tfos['x_at_current_tap'][bridx]
+        Z_BASE = br['nominal_v_2']**2 / BASE_MVA
         h = BASE_MVA / x * Z_BASE
-        b1 = l['bus1_id']
-        b2 = l['bus2_id']
-        model.add_linear_constraint(PLine[lidx] - h * (theta[b1] - theta[b2]), poi.Eq, 0, name=f"flow_{lidx}")
+        b1 = br['bus1_id']
+        b2 = br['bus2_id']
+        flow_expr = poi.ExprBuilder()
+        flow_expr += PLine[bridx] - h * (theta[b1] - theta[b2])
+        if bridx in psts.index:
+            flow_expr += - h * (phi[bridx])
+        branch_constraints[bridx] = model.add_linear_constraint(flow_expr, poi.Eq, 0, name=f"flow_{bridx}")
 
-    for pstidx, pst in psts.iterrows():
-        x = tfos['x_at_current_tap'][pstidx]
-        Z_BASE = tfos['nominal_v_2'][pstidx]**2 / BASE_MVA
-        h = BASE_MVA / x * Z_BASE
-        b1 = tfos['bus1_id'][pstidx]
-        b2 = tfos['bus2_id'][pstidx]
-        model.add_linear_constraint(PLine[pstidx] - h * (theta[b1] - theta[b2] + phi[pstidx]), poi.Eq, 0, name=f"flow_{pstidx}")
+        if not variables_bounds:
+            con_lb[bridx] = model.add_linear_constraint(
+                PLine[bridx], poi.Geq, -df_branches.at[bridx, 'max_p'],
+                name=f"flow_lb_{bridx}"
+            )
+            con_ub[bridx] = model.add_linear_constraint(
+                PLine[bridx], poi.Leq, df_branches.at[bridx, 'max_p'],
+                name=f"flow_ub_{bridx}"
+            )
 
     # Power balance: generation - load - outgoing + incoming = 0
+    power_balance_constraints = {}
     for busId, busComponents in bus_map.items():
         expr = poi.ExprBuilder()
         for g in busComponents['PGen']:
@@ -147,7 +164,7 @@ def theta_formulation(network):
             expr += PLine[l_in]
         for l_out in busComponents['PLineOut']:
             expr -= PLine[l_out]
-        model.add_linear_constraint(expr, poi.Eq, 0, name=f"bal_{busId}")
+        power_balance_constraints[busId] = model.add_linear_constraint(expr, poi.Eq, 0, name=f"bal_{busId}")
 
     C_PST = 5
     obj = poi.ExprBuilder()
@@ -162,6 +179,8 @@ def theta_formulation(network):
     model.optimize()
 
     def v(x): return model.get_value(x)
+    def dual(c): return model.get_constraint_attribute(c, poi.ConstraintAttribute.Dual)
+
     results = {}
     for g, Pg in PGen.items():
         results[g] = v(Pg)
@@ -173,21 +192,25 @@ def theta_formulation(network):
 
     print(results)
 
-    # rhs = params["Pd"].get(bus, 0.0) + p0_shift
-    # expr = poi.ExprBuilder()
-    # for g in gens:
-    #     expr += ctx["Pg"][g]
-    #     if g in ctx.get("curt", {}):
-    #         expr -= ctx["curt"][g]
-    # for br in lines_in:
-    #     expr += ctx["P"][br]
-    # for br in lines_out:
-    #     expr -= ctx["P"][br]
-    # if bus in ctx.get("shed", {}):
-    #     expr += ctx["shed"][bus]  # shed reduces net demand: move to lhs
-    # m.add_linear_constraint(expr, poi.Eq, rhs, name=f"bal_{bus}")
+    if not variables_bounds:
+        print("Active line constraints:")
+        for branchId in df_branches.index:
+            mu_lb = dual(con_lb[branchId])
+            mu_ub = dual(con_ub[branchId])
+            if abs(mu_lb) > 1e-6:
+                print(f"  {branchId} lower bound ACTIVE  μ⁻ = {mu_lb:.4f}")
+            if abs(mu_ub) > 1e-6:
+                print(f"  {branchId} upper bound ACTIVE  μ⁺ = {mu_ub:.4f}")
+
+    lambda0 = dual(power_balance_constraints[buses.index[0]])
+    print(f"System marginal price λ₀ = {lambda0:.4f} $/MWh")
+
+    # In an uncongested system all nodal duals should equal λ₀
+    for bus in buses.index:
+        lmp = dual(power_balance_constraints[bus])
+        print(f"  Bus {bus}: LMP = {lmp:.4f}  (deviation from λ₀: {lmp - lambda0:.4f})")
 
 if __name__ == "__main__":
     network = pp.network.load("pst1.xiidm")
-    #network = pp.network.load("pst2.xiidm")
+    # network = pp.network.load("pst2.xiidm")
     theta_formulation(network)

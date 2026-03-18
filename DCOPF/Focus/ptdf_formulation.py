@@ -148,7 +148,6 @@ def ptdf_formulation(network):
     delta = ptdf_matrix @ P_l
 
     con_lb, con_ub = {}, {}
-
     for l, branchId in enumerate(branches):
         P_flow = poi.quicksum(M[l, g] * Pg for g, Pg in enumerate(PGen.values())) - delta[l] + poi.quicksum(psdf_matrix[l, p] * phiVar for p, phiVar in enumerate(phi.values()))
         con_lb[branchId] = model.add_linear_constraint(P_flow, poi.Geq, -df_branches['max_p'][branchId])
@@ -211,5 +210,5 @@ def ptdf_formulation(network):
 
 if __name__ == "__main__":
     network = pp.network.load("pst1.xiidm")
-    #network = pp.network.load("pst2.xiidm")
+    # network = pp.network.load("pst2.xiidm")
     ptdf_formulation(network)
