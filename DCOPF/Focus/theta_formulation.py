@@ -7,9 +7,7 @@ THETA_MAX   = math.pi / 3
 PHI_MAX   = math.radians(30.0)
 BASE_MVA = 100
 
-def theta_formulation():
-    network = pp.network.load("pst1.xiidm")
-
+def theta_formulation(network):
     generators = network.get_generators(all_attributes=True)
     loads = network.get_loads(all_attributes=True)
     buses = network.get_buses(all_attributes=True)
@@ -190,4 +188,6 @@ def theta_formulation():
     # m.add_linear_constraint(expr, poi.Eq, rhs, name=f"bal_{bus}")
 
 if __name__ == "__main__":
-    theta_formulation()
+    network = pp.network.load("pst1.xiidm")
+    #network = pp.network.load("pst2.xiidm")
+    theta_formulation(network)

@@ -10,9 +10,7 @@ from scipy import sparse
 
 PHI_MAX   = math.radians(30.0)
 
-def ptdf_formulation():
-    network = pp.network.load("pst1.xiidm")
-
+def ptdf_formulation(network):
     generators = network.get_generators(all_attributes=True)
     loads = network.get_loads(all_attributes=True)
     buses = network.get_buses(all_attributes=True)
@@ -212,4 +210,6 @@ def ptdf_formulation():
             print(f"  {pstId}  ψ + φ ≥ 0  ACTIVE  μ = {mu_ub:.4f}  (φ = -ψ, negative shift binding)")
 
 if __name__ == "__main__":
-    ptdf_formulation()
+    network = pp.network.load("pst1.xiidm")
+    #network = pp.network.load("pst2.xiidm")
+    ptdf_formulation(network)
