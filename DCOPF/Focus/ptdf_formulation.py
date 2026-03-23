@@ -10,6 +10,59 @@ from scipy import sparse
 
 PHI_MAX   = math.radians(30.0)
 
+def validate(network, results):
+    for g, pval in results["Pg"].items():
+        network.update_generators(id=g, target_p=pval)
+
+    psts_steps = network.get_phase_tap_changer_steps(all_attributes=True)
+    psts = network.get_phase_tap_changers(all_attributes=True)
+
+    psts_taps = {}
+    psts_characteristics = {}
+    for pstId, phiVal in results["phi"].items():
+        pst_steps = psts_steps.loc[pstId]
+        zero_alpha_step = pst_steps[pst_steps['alpha'] == 0]
+        zero_alpha_step_index = zero_alpha_step.index[0]
+
+        next_step_index = zero_alpha_step_index + 1
+        alpha_next = pst_steps.loc[next_step_index, 'alpha']
+
+        tap_step = zero_alpha_step_index + round(phiVal / alpha_next)
+        tap_step = max(psts['low_tap'][pstId], min(psts['high_tap'][pstId], tap_step))
+        psts_taps[pstId] = tap_step
+
+        psts_characteristics[pstId] = {
+            'zero_alpha_step_index': zero_alpha_step_index,
+            'alpha_step': alpha_next
+        }
+
+    network.update_phase_tap_changers(
+        id=list(psts_taps.keys()),
+        tap=[tap for tap in psts_taps.values()]
+    )
+
+    lf_params = lf.Parameters(distributed_slack=False)
+    lf_results = pp.loadflow.run_dc(network, parameters=lf_params)
+
+    lines  = network.get_lines(all_attributes=True)
+    tfos = network.get_2_windings_transformers(all_attributes=True)
+    branches = pd.concat([lines, tfos], sort=False)
+
+    branches_flows = {
+        br: branches.loc[br,  "p1"] for br in branches.index
+    }
+
+    print("\n── pypowsybl validation ─────────────────────────────────────────")
+    for c in lf_results:
+        print(f"  Component {c.connected_component_num}: {c.status}")
+    for pstId, tap in psts_taps.items():
+        print(f"  PST tap: {tap}  (φ_opt={results['phi'][pstId]:+.2f}°, tap≈{(tap-psts_characteristics[pstId]['zero_alpha_step_index'])*psts_characteristics[pstId]['alpha_step']:+.0f}°)")
+    print(f"  {'Branch':<8}  {'OPF':>8}  {'LF':>8}  {'Δ':>7}")
+    for br in branches.index:
+        opf = results["Pl"][br]
+        lf_v = branches_flows[br]
+        print(f"  {br:<8}  {opf:>+8.2f}  {lf_v:>+8.2f}  {opf-lf_v:>+7.3f}")
+
 def ptdf_formulation(network):
     generators = network.get_generators(all_attributes=True)
     loads = network.get_loads(all_attributes=True)
@@ -52,12 +105,12 @@ def ptdf_formulation(network):
     sa.add_branch_flow_factor_matrix(branches, psts.index, "PSDF")
     res = sa.run(network, parameters=lf.Parameters(distributed_slack=False))
     ptdf = {comp: {br: float(res.get_sensitivity_matrix("PTDF").loc[comp, br]) for br in branches} for comp in injection_variables}
-    psdf = {br: float(res.get_sensitivity_matrix("PSDF").loc["PST_T", br]) * (180 / math.pi) for br in branches}
+    psdf = {comp: {br: float(res.get_sensitivity_matrix("PSDF").loc[comp, br]) * (180 / math.pi) for br in branches} for comp in psts.index}
 
     print(ptdf)
 
     ptdf_matrix = pd.DataFrame(ptdf).values
-    psdf_matrix = pd.DataFrame(psdf, index=[0]).values.T
+    psdf_matrix = pd.DataFrame(psdf).values
 
     print(ptdf_matrix)
     print(psdf_matrix)
@@ -169,11 +222,10 @@ def ptdf_formulation(network):
     def v(x):
         return model.get_value(x)
 
-    results = {}
-    for g, Pg in PGen.items():
-        results[g] = v(Pg)
-    for phiId, phiVar in phi.items():
-        results['phi_' + phiId] = math.degrees(v(phiVar))
+    results = {
+        "Pg": {g: v(Pg) for g, Pg in PGen.items()},
+        "phi": {phiId: math.degrees(v(phiVar)) for phiId, phiVar in phi.items()}
+    }
     results['cost'] = model.get_model_attribute(poi.ModelAttribute.ObjectiveValue)
 
     print(results)
@@ -181,6 +233,8 @@ def ptdf_formulation(network):
     phi_sol = np.array([model.get_value(phiVar) for phiVar in phi.values()])
 
     flows = M @ p_sol + psdf_matrix @ phi_sol - delta
+
+    results['Pl'] = {branchId: flows[l] for l, branchId in enumerate(branches)}
 
     for l, branchId in enumerate(branches):
         print(f"{branchId}: {flows[l]:.2f} MW  (limit ±{df_branches['max_p'][branchId]:.0f} MW)")
@@ -207,6 +261,8 @@ def ptdf_formulation(network):
             print(f"  {pstId}  ψ - φ ≥ 0  ACTIVE  μ = {mu_lb:.4f}  (φ = ψ, positive shift binding)")
         if abs(mu_ub) > 1e-6:
             print(f"  {pstId}  ψ + φ ≥ 0  ACTIVE  μ = {mu_ub:.4f}  (φ = -ψ, negative shift binding)")
+
+    validate(network, results)
 
 if __name__ == "__main__":
     network = pp.network.load("pst1.xiidm")
