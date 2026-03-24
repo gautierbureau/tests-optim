@@ -69,7 +69,8 @@ def theta_formulation(network):
     line_max_p = {
         'L12a': 110.0,
         'L1_2a': 150,
-        'L2b_3': 200
+        'L2b_3': 200,
+        'HVDC_eq': 100.-30.
     }
 
     tfos_max_p = {
@@ -212,5 +213,6 @@ def theta_formulation(network):
 
 if __name__ == "__main__":
     network = pp.network.load("pst1.xiidm")
+    # network = pp.network.load("hvdc_ptdf_line_equivalent.xiidm")
     # network = pp.network.load("pst2.xiidm")
     theta_formulation(network)

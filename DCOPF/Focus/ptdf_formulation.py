@@ -75,7 +75,8 @@ def ptdf_formulation(network):
     line_max_p = {
         'L12a': 110.0,
         'L1_2a': 150,
-        'L2b_3': 200
+        'L2b_3': 200,
+        'HVDC_eq': 100. - 30.
     }
 
     tfos_max_p = {
@@ -232,7 +233,10 @@ def ptdf_formulation(network):
     p_sol = np.array([model.get_value(Pg) for Pg in PGen.values()])
     phi_sol = np.array([model.get_value(phiVar) for phiVar in phi.values()])
 
-    flows = M @ p_sol + psdf_matrix @ phi_sol - delta
+    # flows = M @ p_sol + psdf_matrix @ phi_sol - delta
+    flows = M @ p_sol - delta
+    if phi_sol.any():
+        flows += psdf_matrix @ phi_sol
 
     results['Pl'] = {branchId: flows[l] for l, branchId in enumerate(branches)}
 
@@ -266,5 +270,6 @@ def ptdf_formulation(network):
 
 if __name__ == "__main__":
     network = pp.network.load("pst1.xiidm")
+    # network = pp.network.load("hvdc_ptdf_line_equivalent.xiidm")
     # network = pp.network.load("pst2.xiidm")
     ptdf_formulation(network)
