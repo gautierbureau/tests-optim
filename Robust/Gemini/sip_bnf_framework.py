@@ -23,7 +23,11 @@ class SIP_Framework:
             worst_y = self.llp.get_violation_point()
             violation_score = self.llp.get_violation_score(current_x)
 
-            print(f"{i:<5} | {current_x:<10.4f} | {worst_y:<10.4f} | {max(0, violation_score):<10.4f}")
+            if len(current_x) > 0:
+                x_str = ", ".join(f"{val:.4f}" for val in current_x)
+            else:
+                x_str = f"{current_x:<10.4f}"
+            print(f"{i:<5} | {x_str} | {worst_y:<10.4f} | {max(0, violation_score):<10.4f}")
 
             # 3. Test de convergence
             if violation_score <= tol:
